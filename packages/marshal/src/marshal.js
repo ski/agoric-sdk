@@ -320,8 +320,12 @@ const makeRemotableProto = (oldProto, iface) => {
  */
 const isRemotableProto = val => {
   if (
-    !(typeof val === 'object' && !Array.isArray(val) && val !== null) &&
-    isFrozen(val)
+    !(
+      typeof val === 'object' &&
+      !Array.isArray(val) &&
+      val !== null &&
+      isFrozen(val)
+    )
   ) {
     return false;
   }
