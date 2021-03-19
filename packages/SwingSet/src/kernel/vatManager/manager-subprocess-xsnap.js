@@ -43,8 +43,8 @@ export function makeXsSubprocessFactory({
    * @param { ManagerOptions } managerOptions
    */
   async function createFromBundle(vatID, bundle, managerOptions) {
-    parentLog(vatID, 'createFromBundle', { vatID });
-    const { vatParameters, virtualObjectCacheSize } = managerOptions;
+    const { vatParameters, virtualObjectCacheSize, name } = managerOptions;
+    parentLog(vatID, 'createFromBundle', { vatID, name });
     assert(!managerOptions.metered, 'xs-worker: metered not supported yet');
     assert(
       !managerOptions.enableSetup,
@@ -123,7 +123,7 @@ export function makeXsSubprocessFactory({
     }
 
     // start the worker and establish a connection
-    const { worker, bundles } = startXSnap(`${vatID}`, handleCommand);
+    const { worker, bundles } = startXSnap(`${vatID}:${name}`, handleCommand);
     for await (const [it, superCode] of Object.entries(bundles)) {
       parentLog(vatID, 'eval bundle', it);
       assert(
