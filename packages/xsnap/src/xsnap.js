@@ -86,7 +86,7 @@ export function xsnap(options) {
   /** @type {Deferred<void>} */
   const vatExit = defer();
 
-  const args = snapshot ? ['-r', snapshot] : [];
+  const args = snapshot ? ['-r', snapshot, name] : [name];
   if (meteringLimit) {
     args.push('-l', `${meteringLimit}`);
   }
