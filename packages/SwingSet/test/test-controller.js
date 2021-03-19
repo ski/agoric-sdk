@@ -1,6 +1,6 @@
 /* global require __dirname */
-import '@agoric/install-ses';
-import test from 'ava';
+// eslint-disable-next-line import/no-extraneous-dependencies
+import test from '@agoric/swingset-vat/tools/prepare-test-env';
 import path from 'path';
 import { buildVatController, loadBasedir } from '../src/index';
 import { checkKT } from './util';
