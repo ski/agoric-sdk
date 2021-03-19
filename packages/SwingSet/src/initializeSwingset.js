@@ -255,13 +255,13 @@ export async function initializeSwingset(
 
   const {
     kernelBundles = await buildKernelBundles(),
-    managerType = env.WORKER_TYPE || 'local',
+    defaultManagerType = env.WORKER_TYPE || 'local',
   } = initializationOptions;
 
   hostStorage.set('kernelBundle', JSON.stringify(kernelBundles.kernel));
   hostStorage.set('lockdownBundle', JSON.stringify(kernelBundles.lockdown));
   hostStorage.set('supervisorBundle', JSON.stringify(kernelBundles.supervisor));
-  hostStorage.set('defaultManagerType', JSON.stringify(managerType));
+  hostStorage.set('defaultManagerType', JSON.stringify(defaultManagerType));
 
   if (config.bootstrap && argv) {
     if (config.vats[config.bootstrap]) {

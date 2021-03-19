@@ -44,7 +44,13 @@ async function makeMapStorage(file) {
   return map;
 }
 
-export async function connectToFakeChain(basedir, GCI, delay, inbound) {
+export async function connectToFakeChain(
+  basedir,
+  GCI,
+  delay,
+  inbound,
+  defaultManagerType,
+) {
   const mailboxFile = path.join(basedir, `fake-chain-${GCI}-mailbox.json`);
   const bootAddress = `${GCI}-client`;
 
@@ -75,6 +81,7 @@ export async function connectToFakeChain(basedir, GCI, delay, inbound) {
     argv,
     GCI, // debugName
     meterProvider,
+    defaultManagerType,
   );
 
   const { savedHeight, savedActions, savedChainSends } = s;

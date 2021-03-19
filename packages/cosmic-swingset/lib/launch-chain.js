@@ -48,6 +48,7 @@ async function buildSwingset(
   vatsDir,
   argv,
   debugName = undefined,
+  defaultManagerType,
 ) {
   const debugPrefix = debugName === undefined ? '' : `${debugName}:`;
   let config = loadSwingsetConfigFile(`${vatsDir}/chain-config.json`);
@@ -76,7 +77,10 @@ async function buildSwingset(
   };
 
   if (!swingsetIsInitialized(storage)) {
-    await initializeSwingset(config, argv, storage, { debugPrefix });
+    await initializeSwingset(config, argv, storage, {
+      debugPrefix,
+      defaultManagerType,
+    });
   }
   const controller = await makeSwingsetController(storage, deviceEndowments);
 
@@ -95,6 +99,7 @@ export async function launch(
   argv,
   debugName = undefined,
   meterProvider = new MeterProvider(),
+  defaultManagerType,
 ) {
   log.info('Launching SwingSet kernel');
 
@@ -114,6 +119,7 @@ export async function launch(
     vatsDir,
     argv,
     debugName,
+    defaultManagerType,
   );
 
   const METRIC_LABELS = { app: 'ag-chain-cosmos' };

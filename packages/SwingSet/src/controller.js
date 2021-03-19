@@ -229,6 +229,8 @@ export async function makeSwingsetController(
 
   const kernelOptions = { verbose, testTrackDecref, defaultManagerType };
   const kernel = buildKernel(kernelEndowments, deviceEndowments, kernelOptions);
+  // Use ambient process.env only if caller did not specify.
+  const { env = process.env } = runtimeOptions;
 
   if (runtimeOptions.verbose) {
     kernel.kdebugEnable(true);
@@ -320,13 +322,11 @@ export async function buildVatController(
     kernelBundles,
     debugPrefix,
     testTrackDecref,
-    defaultManagerType,
   } = runtimeOptions;
   const actualRuntimeOptions = {
     verbose,
     debugPrefix,
     testTrackDecref,
-    defaultManagerType,
   };
   const initializationOptions = { verbose, kernelBundles };
   let bootstrapResult;
