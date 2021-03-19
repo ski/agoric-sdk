@@ -1,4 +1,4 @@
-/* global require */
+/* global require, process */
 import fs from 'fs';
 import path from 'path';
 
@@ -229,6 +229,7 @@ export async function initializeSwingset(
   argv = [],
   hostStorage = initSwingStore().storage,
   initializationOptions = {},
+  runtimeOptions = {},
 ) {
   insistStorageAPI(hostStorage);
 
@@ -249,11 +250,18 @@ export async function initializeSwingset(
     config.devices = {};
   }
 
-  const { kernelBundles = await buildKernelBundles() } = initializationOptions;
+  // Use ambient process.env only if caller did not specify.
+  const { env = process.env } = runtimeOptions;
+
+  const {
+    kernelBundles = await buildKernelBundles(),
+    managerType = env.WORKER_TYPE || 'local',
+  } = initializationOptions;
 
   hostStorage.set('kernelBundle', JSON.stringify(kernelBundles.kernel));
   hostStorage.set('lockdownBundle', JSON.stringify(kernelBundles.lockdown));
   hostStorage.set('supervisorBundle', JSON.stringify(kernelBundles.supervisor));
+  hostStorage.set('defaultManagerType', JSON.stringify(managerType));
 
   if (config.bootstrap && argv) {
     if (config.vats[config.bootstrap]) {

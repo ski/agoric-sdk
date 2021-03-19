@@ -67,7 +67,12 @@ export function makeVatKeeper(
     assert(source.bundle || source.bundleName);
     assert.typeof(options, 'object');
     storage.set(`${vatID}.source`, JSON.stringify(source));
-    storage.set(`${vatID}.options`, JSON.stringify(options));
+    const managerType =
+      options.managerType || JSON.parse(storage.get('defaultManagerType'));
+    storage.set(
+      `${vatID}.options`,
+      JSON.stringify({ ...options, managerType }),
+    );
   }
 
   function getSourceAndOptions() {

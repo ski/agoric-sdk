@@ -49,8 +49,8 @@ export async function makeSwingsetController(
 ) {
   insistStorageAPI(hostStorage);
 
-  // Use ambient process.env only if caller did not specify.
-  const { env = process.env } = runtimeOptions;
+  const defaultManagerType = JSON.parse(hostStorage.get('defaultManagerType'));
+  assert.typeof(defaultManagerType, 'string');
 
   // build console early so we can add console.log to diagnose early problems
   const {
@@ -58,7 +58,6 @@ export async function makeSwingsetController(
     debugPrefix = '',
     slogFile,
     testTrackDecref,
-    defaultManagerType = env.WORKER_TYPE || 'local',
   } = runtimeOptions;
   if (typeof Compartment === 'undefined') {
     throw Error('SES must be installed before calling makeSwingsetController');
