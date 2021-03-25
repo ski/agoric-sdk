@@ -115,6 +115,10 @@ export function buildRootObject(_vatPowers) {
         observeIteration(makeApprovedNotifier(pursesNotifier), updater);
         return notifier;
       },
+      async getIssuersNotifier() {
+        await approve();
+        return walletAdmin.getIssuersNotifier();
+      },
       async addOffer(offer) {
         await approve();
         return walletAdmin.addOffer(offer, { ...meta, dappOrigin });
@@ -157,6 +161,10 @@ export function buildRootObject(_vatPowers) {
       async suggestIssuer(petname, boardId) {
         await approve();
         return walletAdmin.suggestIssuer(petname, boardId, dappOrigin);
+      },
+      async suggestIssuerDirect(petname, issuer) {
+        await approve();
+        return walletAdmin.suggestIssuerDirect(petname, issuer, dappOrigin);
       },
       async suggestInstallation(petname, boardId) {
         await approve();
@@ -208,6 +216,9 @@ export function buildRootObject(_vatPowers) {
     },
     async getPursesNotifier() {
       return walletAdmin.getAttenuatedPursesNotifier();
+    },
+    async getIssuersNotifier() {
+      return walletAdmin.getIssuersNotifier();
     },
     suggestInstallation(petname, installationBoardId) {
       return walletAdmin.suggestInstallation(petname, installationBoardId);

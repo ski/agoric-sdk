@@ -1248,6 +1248,25 @@ export function makeWallet({
     );
   }
 
+  async function suggestIssuerDirect(
+    suggestedPetname,
+    issuer,
+    dappOrigin = undefined,
+  ) {
+    // TODO: add an approval step in the wallet UI in which
+    // suggestion can be rejected and the suggested petname can be
+    // changed
+    let petname;
+    if (dappOrigin === undefined) {
+      petname = suggestedPetname;
+    } else {
+      const edgename = edgeMapping.valToPetname.get(dappOrigin);
+      petname = [edgename, suggestedPetname];
+    }
+
+    addIssuer(petname, issuer, true);
+  }
+
   async function suggestInstance(
     suggestedPetname,
     instanceHandleBoardId,
@@ -1455,6 +1474,7 @@ export function makeWallet({
     disableAutoDeposit,
     getDepositFacetId,
     suggestIssuer,
+    suggestIssuerDirect,
     suggestInstance,
     suggestInstallation,
     addContact,
