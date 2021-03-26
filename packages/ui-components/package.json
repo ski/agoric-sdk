@@ -10,7 +10,8 @@
     "@agoric/install-ses": "^0.5.4",
     "@agoric/nat": "^4.0.0",
     "@agoric/zoe": "^0.13.1",
-    "clsx": "^1.1.1"
+    "clsx": "^1.1.1",
+    "react-number-format": "^4.5.1"
   },
   "peerDependencies": {
     "@material-ui/core": "^4.11.3",
