@@ -164,6 +164,7 @@ export function makeWallet({
      * @returns {PursesJSONState}
      */
     const innerFilter = ({
+      brand,
       brandBoardId,
       depositBoardId,
       brandPetname,
@@ -174,6 +175,7 @@ export function makeWallet({
       currentAmount,
     }) =>
       harden({
+        brand,
         brandBoardId,
         ...(depositBoardId && { depositBoardId }),
         brandPetname,
