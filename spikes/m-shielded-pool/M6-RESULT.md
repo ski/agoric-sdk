@@ -21,15 +21,27 @@ withdraw verifies + wants N → atomicRearrange pays from the pool + burns the n
 double-withdraw→rejected (nullifier). Demo uses a self-contained ZCFMint asset + faucet; production swaps
 terms.Asset = IST (escrow code path identical).
 
-## Remaining (M6d–M6f)
-- **M6d — encrypted note discovery.** Attach note ciphertexts (amount, rho, nk) encrypted to the recipient's
-  key so they can scan + decrypt incoming notes. Without it the pool is sound but unusable (you can't find your
-  notes). Client encrypt/decrypt + contract stores ciphertexts alongside commitments. No new chain primitive.
-- **M6e — client prover productionization.** WASM prover loads the CEREMONY pk (vs in-WASM setup); sk + rho
-  derived from the WebAuthn-PRF passkey output; brotli + lazy-load + service-worker wiring into the moimoi client.
+## M6d — encrypted note discovery ✅
+ECIES (X25519 ECDH + AES-256-GCM, Node built-in; same scheme as moimoi §F enc keys): each transfer attaches a
+note ciphertext encrypting the opening (amount, nk, rho) to the recipient's X25519 pubkey. Recipients
+trial-decrypt all on-chain ciphertexts; only theirs opens (auth tag gates). Demo (`notes/discover.mjs`): Alice +
+Bob each recover exactly their note, eavesdropper recovers nothing. Contract wiring: deposit/transfer offerArgs
+carry noteCiphertexts → published to a `notes` vstorage child (same proven publish path).
+
+## M6e — production WASM client prover ✅
+`prover-wasm` LOADS the ceremony pk + ccs (vs the M4b in-WASM 30 s setup) and proves on-device. ALL secrets
+(spend key sk + randomness rho) derived from the WebAuthn-PRF output via sha256(prf, label) → fr — nothing
+stored, nothing leaves the device. GOOS=js GOARCH=wasm: 14.5 MB raw / 3.16 MB gzip / ~2.7 MB brotli; in node it
+loads the ceremony pk, proves a hardened transfer from a passkey seed, and self-verifies under the ceremony vk.
+
+## Remaining
 - **M6f — graduate to moimoi proper + vk-as-gov-param + audit prep.** Move circuit/prover/contracts from the
-  agoric fork spikes into moimoi (contracts/UI/flows); pin vk as a gov param; nullifier-set storage strategy;
-  ZK + value-contract audit before real funds.
+  agoric fork spikes into moimoi (contracts/UI/flows); wire brotli + lazy-load + service-worker (SW exists from
+  0015 S9) for the prover; pin vk as a gov param; nullifier-set storage strategy; ZK + value-contract audit
+  before real funds. (This is the cross-repo product integration.)
+
+Deferred (per directive, until the product is whole): real independent validators (M5d) + a real external MPC
+ceremony with public transcript.
 
 Deferred (per directive, until the product is whole): real independent validators (M5d) + a real external MPC
 ceremony with public transcript.
