@@ -30,8 +30,8 @@ and consensus-safe. Standalone verify cost ~0.8 ms (spike i); the Go handler uni
 
     cd packages/cosmic-swingset
     make scenario2-setup                                                  # genesis (chain-id agoriclocal)
-    # GOTCHA: `jq` is NOT installed in this WSL, so scenario2-setup's voting_period edit silently fails
-    # (genesis stays at the 36h default). Patch it directly (genesis only applies at re-genesis):
+    # NOTE: scenario2-setup needs `jq` (now installed) to apply its 45s voting_period; on a fresh WSL
+    # without jq the edit no-ops (genesis stays at the 36h default) — install jq, or patch directly:
     python3 -c 'import json;p="t1/n0/config/genesis.json";g=json.load(open(p));g["app_state"]["gov"]["params"].update({"voting_period":"10s","expedited_voting_period":"10s","max_deposit_period":"10s"});json.dump(g,open(p,"w"))'
 
     GH=$(sha256sum t1/n0/config/genesis.json | cut -d" " -f1)
@@ -46,5 +46,5 @@ and consensus-safe. Standalone verify cost ~0.8 ms (spike i); the Go handler uni
 ## Chain-ops notes
 - `agd` is `~/agoric-sdk/bin/agd`; the chain runs as `node packages/cosmic-swingset/src/entrypoint.js … start`
   (the Node controller loads the cgo `agcosmosdaemon.node` that contains the Go verifier).
-- `jq` missing in WSL → install it (`apt-get install jq`) to make scenario2-setup's genesis edits work.
+- `jq` is required by scenario2-setup for its genesis edits (now installed: /usr/bin/jq, jq-1.8.1).
 - Editing `genesis.json` only matters at re-genesis; a restart replays from `data/`.
