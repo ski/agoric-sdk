@@ -125,7 +125,144 @@ func proveShielded(_ js.Value, args []js.Value) any {
 	return map[string]any{"proof": b64(pb.Bytes()), "pub": b64(pubBytes)}
 }
 
+type depositInputs struct {
+	Cm     string `json:"cm"`
+	Amount uint64 `json:"amount"`
+	Nk     string `json:"nk"`
+	Rho    string `json:"rho"`
+}
+
+// proveShieldedDeposit(pkB64, ccsB64, inputsJson) -> {proof, pub} — binds a commitment to the public amount.
+func proveShieldedDeposit(_ js.Value, args []js.Value) any {
+	defer func() { recover() }()
+	if len(args) < 3 {
+		return errObj("proveShieldedDeposit(pkB64, ccsB64, inputsJson)")
+	}
+	ccs, pk, e := loadKeys(args[0].String(), args[1].String())
+	if e != "" {
+		return errObj(e)
+	}
+	var in depositInputs
+	if err := json.Unmarshal([]byte(args[2].String()), &in); err != nil {
+		return errObj("bad inputs json")
+	}
+	w := &pool.Deposit{Cm: feDec(in.Cm), Amount: in.Amount, Nk: feDec(in.Nk), Rho: feDec(in.Rho)}
+	return proveAndPack(ccs, pk, w)
+}
+
+type withdrawInputs struct {
+	Sk        string `json:"sk"`
+	Amount    uint64 `json:"amount"`
+	Rho       string `json:"rho"`
+	LeafIndex int    `json:"leafIndex"`
+}
+
+// proveShieldedWithdraw(pkB64, ccsB64, inputsJson) -> {proof, pub} — proves ownership of a note for a revealed amount.
+func proveShieldedWithdraw(_ js.Value, args []js.Value) any {
+	defer func() { recover() }()
+	if len(args) < 3 {
+		return errObj("proveShieldedWithdraw(pkB64, ccsB64, inputsJson)")
+	}
+	ccs, pk, e := loadKeys(args[0].String(), args[1].String())
+	if e != "" {
+		return errObj(e)
+	}
+	var in withdrawInputs
+	if err := json.Unmarshal([]byte(args[2].String()), &in); err != nil {
+		return errObj("bad inputs json")
+	}
+	sk := feDec(in.Sk)
+	rho := feDec(in.Rho)
+	nk := pool.HashFr(sk, pool.FeU64(pool.NkTag))
+	cm := pool.HashFr3(pool.FeU64(in.Amount), nk, rho)
+	nf := pool.HashFr(nk, rho)
+	root, pathEls, pathIdx := pool.BuildTreePath(cm, in.LeafIndex)
+	w := &pool.Withdraw{Root: root, Nullifier: nf, Amount: in.Amount, Sk: sk, Rho: rho}
+	for i := 0; i < pool.TreeDepth; i++ {
+		w.PathElements[i] = pathEls[i]
+		w.PathIndices[i] = pathIdx[i]
+	}
+	return proveAndPack(ccs, pk, w)
+}
+
+// loadKeys decodes + reads a ccs + pk from base64.
+func loadKeys(pkB64, ccsB64 string) (*cs.R1CS, groth16.ProvingKey, string) {
+	pkBytes, err := base64.StdEncoding.DecodeString(pkB64)
+	if err != nil {
+		return nil, nil, "bad pk base64"
+	}
+	ccsBytes, err := base64.StdEncoding.DecodeString(ccsB64)
+	if err != nil {
+		return nil, nil, "bad ccs base64"
+	}
+	ccs := groth16.NewCS(ecc.BN254).(*cs.R1CS)
+	if _, err := ccs.ReadFrom(bytes.NewReader(ccsBytes)); err != nil {
+		return nil, nil, "ccs read: " + err.Error()
+	}
+	pk := groth16.NewProvingKey(ecc.BN254)
+	if _, err := pk.ReadFrom(bytes.NewReader(pkBytes)); err != nil {
+		return nil, nil, "pk read: " + err.Error()
+	}
+	return ccs, pk, ""
+}
+
+// proveAndPack proves a witness + returns {proof, pub} base64.
+func proveAndPack(ccs *cs.R1CS, pk groth16.ProvingKey, w frontend.Circuit) any {
+	witness, err := frontend.NewWitness(w, ecc.BN254.ScalarField())
+	if err != nil {
+		return errObj("witness: " + err.Error())
+	}
+	pubW, err := witness.Public()
+	if err != nil {
+		return errObj("public: " + err.Error())
+	}
+	proof, err := groth16.Prove(ccs, pk, witness)
+	if err != nil {
+		return errObj("prove: " + err.Error())
+	}
+	var pb bytes.Buffer
+	if _, err := proof.WriteTo(&pb); err != nil {
+		return errObj("proof serialize: " + err.Error())
+	}
+	pubBytes, err := pubW.MarshalBinary()
+	if err != nil {
+		return errObj("pub serialize: " + err.Error())
+	}
+	return map[string]any{"proof": b64(pb.Bytes()), "pub": b64(pubBytes)}
+}
+
+// mimcShielded(argsJsonArray) -> decimal hash. Lets the client derive nk/nf/commitments on-device (matching the
+// circuit's MiMC) so it can compute which of its notes are spent + seal outputs — without revealing rho/nk.
+func mimcShielded(_ js.Value, args []js.Value) any {
+	defer func() { recover() }()
+	if len(args) < 1 {
+		return errObj("mimcShielded(jsonArrayOfDecimals)")
+	}
+	var ins []string
+	if err := json.Unmarshal([]byte(args[0].String()), &ins); err != nil {
+		return errObj("bad args json")
+	}
+	fes := make([]fr.Element, len(ins))
+	for i, s := range ins {
+		fes[i] = feDec(s)
+	}
+	// reuse the native MiMC over field elements (matches pool.HashFr/HashFr3 + the in-circuit hash)
+	var out fr.Element
+	switch len(fes) {
+	case 2:
+		out = pool.HashFr(fes[0], fes[1])
+	case 3:
+		out = pool.HashFr3(fes[0], fes[1], fes[2])
+	default:
+		return errObj("mimcShielded supports 2 or 3 inputs")
+	}
+	return map[string]any{"hash": out.String()}
+}
+
 func main() {
 	js.Global().Set("proveShielded", js.FuncOf(proveShielded))
+	js.Global().Set("proveShieldedDeposit", js.FuncOf(proveShieldedDeposit))
+	js.Global().Set("proveShieldedWithdraw", js.FuncOf(proveShieldedWithdraw))
+	js.Global().Set("mimcShielded", js.FuncOf(mimcShielded))
 	select {} // keep the wasm alive to service calls
 }
