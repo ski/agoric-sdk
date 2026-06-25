@@ -57,7 +57,9 @@ export const start = async (zcf, privateArgs) => {
   };
 
   const { zcfSeat: pool } = zcf.makeEmptySeatKit();
+  const { zcfSeat: reserve } = zcf.makeEmptySeatKit(); // M7a: protocol fees accrue here
   const escrowed = () => pool.getAmountAllocated('Asset', assetBrand).value;
+  const reserved = () => reserve.getAmountAllocated('Asset', assetBrand).value;
 
   // M6d: encrypted note ciphertexts (opening encrypted to the recipient's key), published so recipients can
   // scan + trial-decrypt their own notes. Opaque to everyone else; unlinkable to commitments on-chain.
@@ -72,7 +74,7 @@ export const start = async (zcf, privateArgs) => {
   const publish = async () => {
     if (!storageNode) return;
     await E(storageNode).setValue(
-      JSON.stringify({ root, leaves: nextIndex, roots: rootHistory.size, nullifiers: [...nullifiers], escrowed: String(escrowed()), notes: noteCiphertexts.length }),
+      JSON.stringify({ root, leaves: nextIndex, roots: rootHistory.size, nullifiers: [...nullifiers], escrowed: String(escrowed()), reserve: String(reserved()), notes: noteCiphertexts.length }),
     );
   };
 
@@ -89,7 +91,7 @@ export const start = async (zcf, privateArgs) => {
       await publishNotes((offerArgs || {}).noteCiphertexts);
       seat.exit();
       await publish();
-      return harden({ ok: true, cm, amount, root, escrowed: String(escrowed()) });
+      return harden({ ok: true, cm, amount, root, escrowed: String(escrowed()), reserve: String(reserved()) });
     } catch (err) { seat.exit(err); throw err; }
   };
 
@@ -106,7 +108,7 @@ export const start = async (zcf, privateArgs) => {
       zcf.atomicRearrange(harden([[pool, seat, { Asset: want }]]));
       seat.exit();
       await publish();
-      return harden({ ok: true, nullifier: nf, amount, escrowed: String(escrowed()) });
+      return harden({ ok: true, nullifier: nf, amount, escrowed: String(escrowed()), reserve: String(reserved()) });
     } catch (err) { seat.exit(err); throw err; }
   };
 
@@ -121,10 +123,16 @@ export const start = async (zcf, privateArgs) => {
       nullifiers.add(nf);
       await insert(cmOut0);
       await insert(cmOut1);
+      // M7a: the fee leaves the shielded set (outputs sum to amtIn - fee), so its escrowed value is no longer
+      // backed by a note — route it from the pool to the protocol reserve, keeping the pool exactly note-backed.
+      const feeV = BigInt(fee);
+      if (feeV > 0n) {
+        zcf.atomicRearrange(harden([[pool, reserve, { Asset: AmountMath.make(assetBrand, feeV) }]]));
+      }
       await publishNotes((offerArgs || {}).noteCiphertexts);
       seat.exit();
       await publish();
-      return harden({ ok: true, nullifier: nf, created: [cmOut0, cmOut1], fee, root });
+      return harden({ ok: true, nullifier: nf, created: [cmOut0, cmOut1], fee, reserve: String(reserved()), root });
     } catch (err) { seat.exit(err); throw err; }
   };
 
@@ -142,7 +150,7 @@ export const start = async (zcf, privateArgs) => {
     makeDepositInvitation: () => zcf.makeInvitation(depositHandler, 'shield-deposit'),
     makeTransferInvitation: () => zcf.makeInvitation(transferHandler, 'shield-transfer'),
     makeWithdrawInvitation: () => zcf.makeInvitation(withdrawHandler, 'shield-withdraw'),
-    getState: () => harden({ root, leaves: nextIndex, roots: rootHistory.size, nullifiers: [...nullifiers], escrowed: String(escrowed()) }),
+    getState: () => harden({ root, leaves: nextIndex, roots: rootHistory.size, nullifiers: [...nullifiers], escrowed: String(escrowed()), reserve: String(reserved()) }),
   });
   const creatorFacet = Far('ShieldedPool creator', { faucet });
 

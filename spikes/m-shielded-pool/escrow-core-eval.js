@@ -9,7 +9,7 @@
 // Conservation: value in == value out; the nullifier prevents double-withdraw. Asset is a self-contained demo
 // token (production: IST) — the deposit/withdraw/escrow code path is identical.
 
-const BUNDLE_ID = 'b1-106c2f578b9412bb39a98d15d4d09cfc56f6aedb6564870f74336c2c50089a044e97f976bc7ef5be6536d5adb9ae85d33f1d75003bc55ab90e865ca43e11fcc9';
+const BUNDLE_ID = "b1-026f09f8a8cb69b6d248239f2a9c247d69d8f931fbb7eec92b1728dfb6fcd16d1ee3d0add08cb66978d48917a4389308ab3beac7e1d7411213a2d7145c1dbe9d";
 
 const TRANSFER_VK =
   'xSAx5cMJDu7AySHBUFkAt5ly8S22ZKNxTz5bDVHg0RWO/BtF+qTBxng3E/1zZ+WZPGWfo+2RywHttIGSenvOYYN6xHn0xgSE6OEjqTKE6DbAZEDVhDQgkgCg5hLCqziRJ5J4duHSDYEJXv1xcNG7g4FaBDo8/G0g5tvH1NJD10qZjpOTkg1IOnJgv7cx+10l8apJMzWp5xKX5IW3rvMSwhgA3u8SHx52QmoAZl5cRHlnQyLU917a3UbevVzZkvbt5yKSeBxlPwQyFitc0tOfoXNvTOYTyo0nI6GM185SL4rTHDyoHRBOe/ZoF8oA2FucKkF4AQjDpU2wrL3Z7bCkWRs9oLBIiouP8JLQeSURntibabtacwzt9WJ/plHyxZvbAAAABupGoenpG0oQhvy94ZZg/bOqHqpS5DFbwylICSjrWDRyrvoHC+2rXVKZ1jBWlinsQJSDt9bIhABN6tEdK0RNQZWS9AeYzxaDRtOqu4ogopertX1XxnDCHPS8iQAvVs+VadQ9RR1GXIzTHipgFYqqVic1kAEINhMiXilf0N7UOJbFxp4uThhtMY+SownpoZLTzPppt2G3P4ZQo7HNnag69naRuK0c6FyhfedxuWeY0K6SV1Jh3Jp9hgfh1xZjt9uqaAAAAAAAAAAA';
@@ -26,6 +26,12 @@ const WD_PROOF =
   'ksK99KeMxBsEirhQgXD+NYz8VsmWQG0HvRdO4XxhFSGsFK0nC94iTT6fn/DAH/F1lXF0ecWdtJ1OYMkCzHmFFiu11M/6+P3+4pSKEopNgv+EYmDZmIhLHs+sZtLOYjLErCLwyasgXt19f/giQ7qw6kLVc69czxBtf09lqRfXISYAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
 const WD_PUB =
   'AAAAAwAAAAAAAAADDtUJ8apMrSyk+weAac6K/2HofhXYli/oPaaTWeSeNo4WomwFdZk7uUrlJy0QufuS1fFOtwwRIQ2iM8+vbfL8EgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPo';
+
+// hardened transfer proof (M6a, root 6708…) — spends the deposited note, fee 3 → reserve (M7a)
+const TR_PROOF =
+  'n40nqAoa4kBSnvJudzpcABmdJp55zTwnT78jHOhoNiqV9ZQZc1GYVfvuuczdPlYnZNIg9S73SjrkNyMuO05zDgAlAS34Z2yETEm2j8Rg8JScrJZ6S33i3Za/fFp2Spxq0KvGa+iZxIZio8L3Oj5xEgEO47aWB9hWlXVeuMAZ5LUAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+const TR_PUB =
+  'AAAABQAAAAAAAAAFDtUJ8apMrSyk+weAac6K/2HofhXYli/oPaaTWeSeNo4WomwFdZk7uUrlJy0QufuS1fFOtwwRIQ2iM8+vbfL8Ei7TjYEg9a2eaXRsboAQcP2cRKWadQ2rqYMhYVREgZySGUODSM3bIlIqnaOMNpIfVRqZlGVPLJm0uzFKQE+xi4sAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAw==';
 
 const run = async powers => {
   const {
@@ -72,11 +78,16 @@ const run = async powers => {
     }
   };
 
-  const withdraw = await doWithdraw('withdraw');
-  const replay = await doWithdraw('double-withdraw');
+  // M7a: a confidential transfer spends the deposited note; fee 3 routes pool -> reserve
+  const trInv = await E(publicFacet).makeTransferInvitation();
+  const trSeat = await E(zoe).offer(trInv, harden({}), harden({}), harden({ proof: TR_PROOF, pub: TR_PUB }));
+  const transfer = await E(trSeat).getOfferResult().then(r => ({ ok: true, r })).catch(e => ({ ok: false, e: String(e.message || e) }));
+
+  // withdrawing the now-spent original note must be rejected (its nullifier was used by the transfer)
+  const withdrawSpent = await doWithdraw('withdraw-after-transfer');
 
   const finalState = await E(publicFacet).getState();
-  await E(testNode).setValue(JSON.stringify({ deposit, withdraw, replay, finalState }));
+  await E(testNode).setValue(JSON.stringify({ deposit, transfer, withdrawSpent, finalState }));
 };
 
 run;
