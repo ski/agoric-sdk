@@ -104,5 +104,9 @@ func main() {
 	wr("ceremony-proof.bin", proof)
 	pb, _ := pub.MarshalBinary()
 	must(os.WriteFile("ceremony-pub.bin", pb, 0o644))
-	fmt.Println("exported: ceremony-vk.bin ceremony-proof.bin ceremony-pub.bin (the ceremony vk replaces the single-party one on-chain via M5c gov)")
+	// M6e: export the ceremony proving key + constraint system so the client (WASM) prover LOADS them
+	// (instead of running setup in-WASM) — the realistic flow: ceremony once, ship pk, prove on device.
+	wr("ceremony-pk.bin", pk)
+	wr("ceremony-ccs.bin", ccs)
+	fmt.Println("exported: ceremony-vk.bin ceremony-proof.bin ceremony-pub.bin ceremony-pk.bin ceremony-ccs.bin")
 }
