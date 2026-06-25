@@ -1,0 +1,9 @@
+{
+  "name": "shielded-pool-spike",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@endo/far": "*"
+  }
+}
