@@ -15,7 +15,7 @@ import (
 	"github.com/consensys/gnark/std/hash/mimc"
 )
 
-const TreeDepth = 8
+const TreeDepth = 32
 
 // domain tags so the MiMC uses (commitment / nullifier / nullifier-key) can never collide.
 const (
@@ -109,30 +109,30 @@ func HashFr3(a, b, c fr.Element) fr.Element { return mimcN(a, b, c) }
 // Nk derives a nullifier key from a spend key (matches the in-circuit nk = MiMC(sk, NkTag)).
 func Nk(sk fr.Element) fr.Element { return HashFr(sk, FeU64(NkTag)) }
 
-// BuildTreePath builds a depth-TreeDepth tree (empty leaves = 0) with `leaf` at `index`.
+// BuildTreePath returns the root + Merkle path for a single `leaf` at `index` in an otherwise-empty tree.
+// O(depth): every sibling is the empty-subtree hash at that level (zeros[d]), so it works at production depth
+// (32) without materializing 2^depth leaves. (The contract maintains the real multi-note tree incrementally;
+// a production prover gets its path from that tree state — this is the demo/single-note case.)
 func BuildTreePath(leaf fr.Element, index int) (fr.Element, [TreeDepth]fr.Element, [TreeDepth]int) {
-	size := 1 << TreeDepth
-	cur := make([]fr.Element, size)
-	for i := range cur {
-		cur[i] = FeU64(0)
+	zeros := make([]fr.Element, TreeDepth)
+	zeros[0] = FeU64(0)
+	for i := 1; i < TreeDepth; i++ {
+		zeros[i] = HashFr(zeros[i-1], zeros[i-1])
 	}
-	cur[index] = leaf
-
 	var pathEls [TreeDepth]fr.Element
 	var pathIdx [TreeDepth]int
-	idx := index
+	cur := leaf
 	for d := 0; d < TreeDepth; d++ {
-		sib := idx ^ 1
-		pathEls[d] = cur[sib]
-		pathIdx[d] = idx & 1
-		next := make([]fr.Element, len(cur)/2)
-		for i := range next {
-			next[i] = HashFr(cur[2*i], cur[2*i+1])
+		bit := (index >> uint(d)) & 1
+		pathEls[d] = zeros[d]
+		pathIdx[d] = bit
+		if bit == 1 {
+			cur = HashFr(zeros[d], cur)
+		} else {
+			cur = HashFr(cur, zeros[d])
 		}
-		cur = next
-		idx /= 2
 	}
-	return cur[0], pathEls, pathIdx
+	return cur, pathEls, pathIdx
 }
 
 // SampleWitness builds the canonical demo transfer: owner sk=555 spends a 1000 note (owner-bound), sending
