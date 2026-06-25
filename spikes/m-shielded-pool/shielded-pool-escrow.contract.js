@@ -59,10 +59,20 @@ export const start = async (zcf, privateArgs) => {
   const { zcfSeat: pool } = zcf.makeEmptySeatKit();
   const escrowed = () => pool.getAmountAllocated('Asset', assetBrand).value;
 
+  // M6d: encrypted note ciphertexts (opening encrypted to the recipient's key), published so recipients can
+  // scan + trial-decrypt their own notes. Opaque to everyone else; unlinkable to commitments on-chain.
+  const noteCiphertexts = [];
+  const notesNode = storageNode ? E(storageNode).makeChildNode('notes') : undefined;
+  const publishNotes = async cts => {
+    if (!cts || !cts.length) return;
+    for (const ct of cts) noteCiphertexts.push(ct);
+    if (notesNode) await E(notesNode).setValue(JSON.stringify(noteCiphertexts));
+  };
+
   const publish = async () => {
     if (!storageNode) return;
     await E(storageNode).setValue(
-      JSON.stringify({ root, leaves: nextIndex, roots: rootHistory.size, nullifiers: [...nullifiers], escrowed: String(escrowed()) }),
+      JSON.stringify({ root, leaves: nextIndex, roots: rootHistory.size, nullifiers: [...nullifiers], escrowed: String(escrowed()), notes: noteCiphertexts.length }),
     );
   };
 
@@ -76,6 +86,7 @@ export const start = async (zcf, privateArgs) => {
       assert(given.value === BigInt(amount), `deposit: gave ${given.value}, proof commits ${amount}`);
       zcf.atomicRearrange(harden([[seat, pool, { Asset: given }]]));
       await insert(cm);
+      await publishNotes((offerArgs || {}).noteCiphertexts);
       seat.exit();
       await publish();
       return harden({ ok: true, cm, amount, root, escrowed: String(escrowed()) });
@@ -110,6 +121,7 @@ export const start = async (zcf, privateArgs) => {
       nullifiers.add(nf);
       await insert(cmOut0);
       await insert(cmOut1);
+      await publishNotes((offerArgs || {}).noteCiphertexts);
       seat.exit();
       await publish();
       return harden({ ok: true, nullifier: nf, created: [cmOut0, cmOut1], fee, root });
