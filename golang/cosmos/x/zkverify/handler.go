@@ -20,6 +20,9 @@ type message struct {
 
 type verifyResult struct {
 	Ok bool `json:"ok"`
+	// Public holds the AUTHENTICATED public inputs (decimal field elements, circuit declaration order),
+	// echoed only when Ok — so a contract binds its ledger to what actually verified, not the caller's claim.
+	Public []string `json:"public,omitempty"`
 }
 
 // VerifyGroth16BN254 is the only supported message type (one circuit family for now).
@@ -57,7 +60,14 @@ func (portHandler) Receive(_ context.Context, str string) (string, error) {
 		}
 		// fail closed: any VerifyBytes failure (soundness OR malformed artifact) collapses to ok:false.
 		ok, _ := VerifyBytes(vk, proof, pub)
-		bz, err := json.Marshal(verifyResult{Ok: ok})
+		res := verifyResult{Ok: ok}
+		if ok {
+			// safe: pub was already parsed + verified above, so PublicInputs cannot disagree with what verified.
+			if pubs, perr := PublicInputs(pub); perr == nil {
+				res.Public = pubs
+			}
+		}
+		bz, err := json.Marshal(res)
 		if err != nil {
 			return "", err
 		}

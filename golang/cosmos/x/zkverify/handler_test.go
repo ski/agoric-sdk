@@ -42,8 +42,16 @@ func tamperB64(t *testing.T, b64 string, idx int) string {
 // The loop-closer for ADR 0014: the exact bridge-port path verifies a real confidential-transfer proof,
 // and fails CLOSED on tampered proof or public inputs — natively, off the XS meter.
 func TestZkVerifyBridgePort(t *testing.T) {
-	if r := recv(t, vkB64, proofB64, pubB64); !r.Ok {
+	r := recv(t, vkB64, proofB64, pubB64)
+	if !r.Ok {
 		t.Fatal("valid proof must verify ok:true through the bridge port")
+	}
+	// the handler echoes AUTHENTICATED public inputs [CommIn, CommOut0, CommOut1, Fee] on ok
+	if len(r.Public) != 4 {
+		t.Fatalf("expected 4 public inputs echoed, got %d: %v", len(r.Public), r.Public)
+	}
+	if r.Public[3] != "3" {
+		t.Fatalf("expected fee (public[3]) == 3, got %q", r.Public[3])
 	}
 	if r := recv(t, vkB64, tamperB64(t, proofB64, 8), pubB64); r.Ok {
 		t.Fatal("tampered proof verified — port does not fail closed")
