@@ -51,6 +51,7 @@ export const BridgeId = /** @type {const} */ ({
   VTRANSFER: 'vtransfer',
   WALLET: 'wallet',
   ZK_VERIFY: 'zkVerify',
+  MIMC_HASH: 'mimcHash',
 });
 harden(BridgeId);
 

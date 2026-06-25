@@ -210,6 +210,7 @@ type GaiaApp struct { // nolint: golint
 	vlocalchainPort  int
 	vtransferPort    int
 	zkVerifyPort     int
+	mimcHashPort     int
 
 	upgradeDetails *upgradeDetails
 
@@ -717,6 +718,10 @@ func NewAgoricApp(
 	// OFF the XS computron meter and ON consensus — a swingset contract reaches it via BridgeId.ZK_VERIFY.
 	app.zkVerifyPort = app.AgdServer.MustRegisterPortHandler("zkVerify", zkverify.NewReceiver())
 
+	// ADR 0014 M6b: native MiMC(BN254) hashing, so a contract maintains the commitment Merkle tree on-chain
+	// using the exact hash the circuit uses (no MiMC-in-JS, no off-chain-seeded roots).
+	app.mimcHashPort = app.AgdServer.MustRegisterPortHandler("mimcHash", zkverify.NewMimcReceiver())
+
 	// create evidence keeper with router
 	evidenceKeeper := evidencekeeper.NewKeeper(
 		appCodec,
@@ -1036,6 +1041,7 @@ type cosmosInitAction struct {
 	VlocalchainPort int `json:"vlocalchainPort"`
 	VtransferPort   int `json:"vtransferPort"`
 	ZkVerifyPort    int `json:"zkVerifyPort"`
+	MimcHashPort    int `json:"mimcHashPort"`
 }
 
 // Name returns the name of the App
@@ -1090,6 +1096,7 @@ func (app *GaiaApp) initController(ctx sdk.Context, bootstrap bool) {
 		VlocalchainPort: app.vlocalchainPort,
 		VtransferPort:   app.vtransferPort,
 		ZkVerifyPort:    app.zkVerifyPort,
+		MimcHashPort:    app.mimcHashPort,
 	}
 	// This uses `BlockingSend` as a friendly wrapper for `sendToController`
 	//

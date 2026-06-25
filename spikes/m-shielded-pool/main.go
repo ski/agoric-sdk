@@ -77,6 +77,19 @@ func main() {
 	must(err)
 	must(os.WriteFile("pub.bin", pubBytes, 0o644))
 	fmt.Println("exported: vk.bin proof.bin pub.bin")
+
+	// values for the on-chain test: cmIn is the input note to deposit; the rest are the public inputs.
+	nk := pool.Nk(pool.FeU64(555))
+	cmIn := pool.HashFr3(pool.FeU64(1000), nk, pool.FeU64(111111))
+	rootv, _, _ := pool.BuildTreePath(cmIn, 0)
+	nf := pool.HashFr(nk, pool.FeU64(111111))
+	cmOut0 := pool.HashFr3(pool.FeU64(600), nk, pool.FeU64(222222))
+	cmOut1 := pool.HashFr3(pool.FeU64(397), pool.Nk(pool.FeU64(777)), pool.FeU64(333333))
+	fmt.Println("CMIN=" + cmIn.String())
+	fmt.Println("ROOT=" + rootv.String())
+	fmt.Println("NF=" + nf.String())
+	fmt.Println("CMOUT0=" + cmOut0.String())
+	fmt.Println("CMOUT1=" + cmOut1.String())
 }
 
 func must(err error) {
