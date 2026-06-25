@@ -1,12 +1,16 @@
 // @ts-nocheck
-// ADR 0014 M6c — shielded pool with REAL IST escrow. Extends the on-chain-tree pool (M6b) with a value layer:
-//   - deposit: give N IST (proposal give {Asset}) + a deposit proof binding cm to N -> escrow the IST + insert cm.
-//   - transfer: confidential 1-in/2-out (M6a/M6b) -> no value moves, only the commitment set changes.
-//   - withdraw: a withdraw proof for a revealed amount + want {Asset: N} -> pay N IST from the pool, burn (nf).
-// Conservation across the lifecycle: IST in == notes' value; transfers preserve it in zero knowledge; withdraw
-// pays out exactly the proven amount. nullifiers prevent double-spend; the tree root is computed on-chain.
+// ADR 0014 M6c — shielded pool with REAL value escrow (deposit / transfer / withdraw).
 //
-// terms: { Asset: IssuerKeyword for IST }   privateArgs: { zkVerify, mimcHash, transferVk, depositVk, withdrawVk, storageNode? }
+//   - deposit: give N Asset (proposal give {Asset}) + a deposit proof binding cm to N -> escrow + insert cm.
+//   - transfer: confidential 1-in/2-out (M6a/M6b) -> no value moves, only the commitment set changes.
+//   - withdraw: a withdraw proof for a revealed amount + want {Asset: N} -> pay N from the pool, burn (nf).
+//
+// Value-layer is asset-agnostic: the escrow uses zcf.atomicRearrange over a Brand. For a self-contained demo
+// the contract mints its own "Shield" asset (+ a test faucet); in production terms.Asset = IST and the faucet
+// is dropped — the deposit/withdraw/escrow code is byte-identical. Root computed on-chain (M6b); nullifiers
+// prevent double-spend; owner-bound notes (M6a).
+//
+// privateArgs: { zkVerify, mimcHash, transferVk, depositVk, withdrawVk, storageNode? }
 import { E, Far } from '@endo/far';
 import { AmountMath } from '@agoric/ertp';
 
@@ -17,7 +21,10 @@ const DEPTH = 8;
 export const start = async (zcf, privateArgs) => {
   const { zkVerify, mimcHash, transferVk, depositVk, withdrawVk, storageNode } = privateArgs;
   assert(zkVerify && mimcHash, 'zkVerify + mimcHash required');
-  const { Asset: assetBrand } = zcf.getTerms().brands;
+
+  // self-contained demo asset (production: terms.Asset = IST, drop the mint + faucet)
+  const shieldMint = await zcf.makeZCFMint('Shield');
+  const { brand: assetBrand } = shieldMint.getIssuerRecord();
 
   const hash2 = async (a, b) => (await E(mimcHash).toBridge({ type: MIMC, inputs: [String(a), String(b)] })).hash;
   const verify = async (vk, proof, pub) => E(zkVerify).toBridge({ type: VERIFY, vk, proof, pub });
@@ -49,18 +56,16 @@ export const start = async (zcf, privateArgs) => {
     return root;
   };
 
-  // the pool's escrowed IST lives on a single internal seat
   const { zcfSeat: pool } = zcf.makeEmptySeatKit();
-  const poolBalance = () => pool.getAmountAllocated('Asset', assetBrand);
+  const escrowed = () => pool.getAmountAllocated('Asset', assetBrand).value;
 
   const publish = async () => {
     if (!storageNode) return;
     await E(storageNode).setValue(
-      JSON.stringify({ root, leaves: nextIndex, roots: rootHistory.size, nullifiers: [...nullifiers], escrowed: String(poolBalance().value) }),
+      JSON.stringify({ root, leaves: nextIndex, roots: rootHistory.size, nullifiers: [...nullifiers], escrowed: String(escrowed()) }),
     );
   };
 
-  // deposit: give N IST + a deposit proof binding cm to N -> escrow + insert cm
   const depositHandler = async (seat, offerArgs) => {
     try {
       const { proof, pub } = offerArgs || {};
@@ -68,16 +73,15 @@ export const start = async (zcf, privateArgs) => {
       assert(res && res.ok, 'deposit: proof rejected');
       const [cm, amount] = res.public; // authenticated [Cm, Amount]
       const given = seat.getAmountAllocated('Asset', assetBrand);
-      assert(given.value === BigInt(amount), `deposit: gave ${given.value} but proof commits ${amount}`);
-      zcf.atomicRearrange(harden([[seat, pool, { Asset: given }]])); // escrow the IST
+      assert(given.value === BigInt(amount), `deposit: gave ${given.value}, proof commits ${amount}`);
+      zcf.atomicRearrange(harden([[seat, pool, { Asset: given }]]));
       await insert(cm);
       seat.exit();
       await publish();
-      return harden({ ok: true, cm, amount, root });
+      return harden({ ok: true, cm, amount, root, escrowed: String(escrowed()) });
     } catch (err) { seat.exit(err); throw err; }
   };
 
-  // withdraw: a withdraw proof for a revealed amount + want N IST -> pay from pool, burn (nf)
   const withdrawHandler = async (seat, offerArgs) => {
     try {
       const { proof, pub } = offerArgs || {};
@@ -88,14 +92,13 @@ export const start = async (zcf, privateArgs) => {
       assert(!nullifiers.has(nf), 'withdraw: nullifier already used');
       const want = AmountMath.make(assetBrand, BigInt(amount));
       nullifiers.add(nf);
-      zcf.atomicRearrange(harden([[pool, seat, { Asset: want }]])); // pay out from the pool
+      zcf.atomicRearrange(harden([[pool, seat, { Asset: want }]]));
       seat.exit();
       await publish();
-      return harden({ ok: true, nullifier: nf, amount });
+      return harden({ ok: true, nullifier: nf, amount, escrowed: String(escrowed()) });
     } catch (err) { seat.exit(err); throw err; }
   };
 
-  // confidential transfer (M6a/M6b): no IST moves, only the commitment set
   const transferHandler = async (seat, offerArgs) => {
     try {
       const { proof, pub } = offerArgs || {};
@@ -113,14 +116,25 @@ export const start = async (zcf, privateArgs) => {
     } catch (err) { seat.exit(err); throw err; }
   };
 
+  // test faucet: mint N Asset to a fresh payment (production: dropped; users hold real IST)
+  const faucet = async value => {
+    const { zcfSeat, userSeat } = zcf.makeEmptySeatKit();
+    shieldMint.mintGains(harden({ Asset: AmountMath.make(assetBrand, BigInt(value)) }), zcfSeat);
+    zcfSeat.exit();
+    return E(userSeat).getPayout('Asset');
+  };
+
   const publicFacet = Far('ShieldedPool public', {
+    getAssetIssuer: () => shieldMint.getIssuerRecord().issuer,
+    getAssetBrand: () => assetBrand,
     makeDepositInvitation: () => zcf.makeInvitation(depositHandler, 'shield-deposit'),
     makeTransferInvitation: () => zcf.makeInvitation(transferHandler, 'shield-transfer'),
     makeWithdrawInvitation: () => zcf.makeInvitation(withdrawHandler, 'shield-withdraw'),
-    getState: () => harden({ root, leaves: nextIndex, roots: rootHistory.size, nullifiers: [...nullifiers], escrowed: String(poolBalance().value) }),
+    getState: () => harden({ root, leaves: nextIndex, roots: rootHistory.size, nullifiers: [...nullifiers], escrowed: String(escrowed()) }),
   });
+  const creatorFacet = Far('ShieldedPool creator', { faucet });
 
   await publish();
-  return harden({ publicFacet });
+  return harden({ publicFacet, creatorFacet });
 };
 harden(start);

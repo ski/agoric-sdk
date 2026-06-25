@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@endo/far": "*"
+    "@endo/far": "*",
+    "@agoric/ertp": "*"
   }
 }

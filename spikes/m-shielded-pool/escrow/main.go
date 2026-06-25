@@ -5,6 +5,8 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/backend/groth16"
@@ -20,6 +22,8 @@ func must(e error) {
 	}
 }
 
+func wr(path string, w io.WriterTo) { f, e := os.Create(path); must(e); defer f.Close(); _, e = w.WriteTo(f); must(e) }
+
 func prove(label string, circuit, assignment frontend.Circuit) (groth16.Proof, groth16.VerifyingKey, frontend.Circuit) {
 	ccs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, circuit)
 	must(err)
@@ -32,7 +36,12 @@ func prove(label string, circuit, assignment frontend.Circuit) (groth16.Proof, g
 	proof, err := groth16.Prove(ccs, pk, w)
 	must(err)
 	must(groth16.Verify(proof, vk, pub))
-	fmt.Printf("%s: %d constraints, prove+verify OK\n", label, ccs.GetNbConstraints())
+	// export the device-hook artifacts for the live round-trip
+	wr(label+"-vk.bin", vk)
+	wr(label+"-proof.bin", proof)
+	pb, _ := pub.MarshalBinary()
+	must(os.WriteFile(label+"-pub.bin", pb, 0o644))
+	fmt.Printf("%s: %d constraints, prove+verify OK, exported %s-{vk,proof,pub}.bin\n", label, ccs.GetNbConstraints(), label)
 	return proof, vk, nil
 }
 
