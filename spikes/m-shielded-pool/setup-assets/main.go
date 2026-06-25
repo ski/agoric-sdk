@@ -11,6 +11,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
@@ -35,20 +37,32 @@ func wr(path string, w io.WriterTo) {
 	}
 }
 
+// wrB64 serializes a gnark object and writes it base64-encoded (the form the deploy core-eval inlines as a VK string).
+func wrB64(path string, w io.WriterTo) {
+	var b bytes.Buffer
+	if _, err := w.WriteTo(&b); err != nil {
+		panic(err)
+	}
+	if err := os.WriteFile(path, []byte(base64.StdEncoding.EncodeToString(b.Bytes())), 0o644); err != nil {
+		panic(err)
+	}
+}
+
 func gen(name string, circuit frontend.Circuit) {
 	t0 := time.Now()
 	ccs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, circuit)
 	if err != nil {
 		panic(fmt.Errorf("%s compile: %w", name, err))
 	}
-	pk, _, err := groth16.Setup(ccs)
+	pk, vk, err := groth16.Setup(ccs)
 	if err != nil {
 		panic(fmt.Errorf("%s setup: %w", name, err))
 	}
 	wr(name+"-ccs.bin", ccs)
 	wr(name+"-pk.bin", pk)
-	fmt.Printf("%s: %d constraints → %s-pk.bin %s-ccs.bin (%s)\n",
-		name, ccs.GetNbConstraints(), name, name, time.Since(t0).Round(time.Millisecond))
+	wrB64(name+"-vk.b64", vk) // verifying key (base64) — the contract privateArg the deploy inlines
+	fmt.Printf("%s: %d constraints → %s-pk.bin %s-ccs.bin %s-vk.b64 (%s)\n",
+		name, ccs.GetNbConstraints(), name, name, name, time.Since(t0).Round(time.Millisecond))
 }
 
 func main() {

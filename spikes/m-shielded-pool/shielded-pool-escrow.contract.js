@@ -16,15 +16,34 @@ import { AmountMath } from '@agoric/ertp';
 
 const VERIFY = 'VERIFY_GROTH16_BN254';
 const MIMC = 'MIMC_BN254';
-const DEPTH = 8;
+const DEPTH = 32; // M7b production depth — MUST match the circuit (pool.TreeDepth) or proof roots never line up
 
 export const start = async (zcf, privateArgs) => {
   const { zkVerify, mimcHash, transferVk, depositVk, withdrawVk, storageNode } = privateArgs;
   assert(zkVerify && mimcHash, 'zkVerify + mimcHash required');
 
-  // self-contained demo asset (production: terms.Asset = IST, drop the mint + faucet)
-  const shieldMint = await zcf.makeZCFMint('Shield');
-  const { brand: assetBrand } = shieldMint.getIssuerRecord();
+  // The value layer is asset-agnostic (escrow is zcf.atomicRearrange over a Brand). PRODUCTION (M6c/M7d): start
+  // with issuerKeywordRecord { Asset: IST } so every funded wallet can deposit/withdraw real value. DEMO: start
+  // with {} and the contract mints its own self-contained "Shield" asset + a test faucet. Same deposit/withdraw code.
+  const terms = zcf.getTerms();
+  let assetBrand;
+  let assetIssuer;
+  let faucet; // defined only in demo mode
+  if (terms.brands && terms.brands.Asset) {
+    assetBrand = terms.brands.Asset;
+    assetIssuer = terms.issuers.Asset;
+  } else {
+    const shieldMint = await zcf.makeZCFMint('Shield');
+    const rec = shieldMint.getIssuerRecord();
+    assetBrand = rec.brand;
+    assetIssuer = rec.issuer;
+    faucet = async value => {
+      const { zcfSeat, userSeat } = zcf.makeEmptySeatKit();
+      shieldMint.mintGains(harden({ Asset: AmountMath.make(assetBrand, BigInt(value)) }), zcfSeat);
+      zcfSeat.exit();
+      return E(userSeat).getPayout('Asset');
+    };
+  }
 
   const hash2 = async (a, b) => (await E(mimcHash).toBridge({ type: MIMC, inputs: [String(a), String(b)] })).hash;
   const verify = async (vk, proof, pub) => E(zkVerify).toBridge({ type: VERIFY, vk, proof, pub });
@@ -39,7 +58,7 @@ export const start = async (zcf, privateArgs) => {
   const nullifiers = new Set();
 
   const insert = async leaf => {
-    assert(nextIndex < 1 << DEPTH, 'tree full');
+    assert(nextIndex < 2 ** DEPTH, 'tree full'); // 1<<32 overflows to 1 in JS — use 2**DEPTH
     let idx = nextIndex;
     let cur = String(leaf);
     for (let level = 0; level < DEPTH; level += 1) {
@@ -136,23 +155,16 @@ export const start = async (zcf, privateArgs) => {
     } catch (err) { seat.exit(err); throw err; }
   };
 
-  // test faucet: mint N Asset to a fresh payment (production: dropped; users hold real IST)
-  const faucet = async value => {
-    const { zcfSeat, userSeat } = zcf.makeEmptySeatKit();
-    shieldMint.mintGains(harden({ Asset: AmountMath.make(assetBrand, BigInt(value)) }), zcfSeat);
-    zcfSeat.exit();
-    return E(userSeat).getPayout('Asset');
-  };
-
   const publicFacet = Far('ShieldedPool public', {
-    getAssetIssuer: () => shieldMint.getIssuerRecord().issuer,
+    getAssetIssuer: () => assetIssuer,
     getAssetBrand: () => assetBrand,
     makeDepositInvitation: () => zcf.makeInvitation(depositHandler, 'shield-deposit'),
     makeTransferInvitation: () => zcf.makeInvitation(transferHandler, 'shield-transfer'),
     makeWithdrawInvitation: () => zcf.makeInvitation(withdrawHandler, 'shield-withdraw'),
     getState: () => harden({ root, leaves: nextIndex, roots: rootHistory.size, nullifiers: [...nullifiers], escrowed: String(escrowed()), reserve: String(reserved()) }),
   });
-  const creatorFacet = Far('ShieldedPool creator', { faucet });
+  // creatorFacet exposes the faucet ONLY in demo mode (self-minted Shield); in IST mode there's nothing to mint.
+  const creatorFacet = Far('ShieldedPool creator', faucet ? { faucet } : {});
 
   await publish();
   return harden({ publicFacet, creatorFacet });

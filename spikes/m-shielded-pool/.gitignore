@@ -1,2 +1,5 @@
 *.bin
 *.wasm
+*.b64
+wire-shielded-coreeval.js
+setup-assets/setup-assets
