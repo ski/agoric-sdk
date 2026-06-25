@@ -19,7 +19,11 @@ export PATH="$PATH:/usr/local/go/bin:$HOME/go/bin"
 OUT="${1:-/mnt/c/Users/suhai/gitt/moimoi/prototype/public/shielded}"
 mkdir -p "$OUT"
 
-echo "==> generating self-consistent pk/ccs for all 3 circuits (current pool.TreeDepth)"
+# WARNING: groth16.Setup is RANDOMIZED — this run's pk/ccs/vk are a matched set. The contract is deployed with
+# the VKs from THIS run (setup-assets/*-vk.b64); the browser proves with THIS run's pk/ccs (emitted below). Do NOT
+# re-run setup-assets separately afterward — it overwrites the bins with a fresh pair and desyncs the deployed VK,
+# making browser proofs verify locally but get rejected on-chain ("deposit: proof rejected").
+echo "==> generating self-consistent pk/ccs/vk for all 3 circuits (current pool.TreeDepth) — ONE run"
 ( cd setup-assets && go run . )
 
 echo "==> building browser prover.wasm"
