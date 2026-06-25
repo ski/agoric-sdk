@@ -132,6 +132,7 @@ import (
 	"github.com/Agoric/agoric-sdk/golang/cosmos/x/vstorage"
 	"github.com/Agoric/agoric-sdk/golang/cosmos/x/vtransfer"
 	vtransferkeeper "github.com/Agoric/agoric-sdk/golang/cosmos/x/vtransfer/keeper"
+	"github.com/Agoric/agoric-sdk/golang/cosmos/x/zkverify"
 	ibctesting "github.com/cosmos/ibc-go/v10/testing"
 
 	// Import the packet forward middleware
@@ -208,6 +209,7 @@ type GaiaApp struct { // nolint: golint
 	vstoragePort     int
 	vlocalchainPort  int
 	vtransferPort    int
+	zkVerifyPort     int
 
 	upgradeDetails *upgradeDetails
 
@@ -711,6 +713,10 @@ func NewAgoricApp(
 		vlocalchain.NewReceiver(app.VlocalchainKeeper),
 	)
 
+	// ADR 0014: native confidential-value verifier. Stateless, deterministic gnark Groth16/BN254 verify run
+	// OFF the XS computron meter and ON consensus — a swingset contract reaches it via BridgeId.ZK_VERIFY.
+	app.zkVerifyPort = app.AgdServer.MustRegisterPortHandler("zkVerify", zkverify.NewReceiver())
+
 	// create evidence keeper with router
 	evidenceKeeper := evidencekeeper.NewKeeper(
 		appCodec,
@@ -1029,6 +1035,7 @@ type cosmosInitAction struct {
 	VibcPort        int `json:"vibcPort"`
 	VlocalchainPort int `json:"vlocalchainPort"`
 	VtransferPort   int `json:"vtransferPort"`
+	ZkVerifyPort    int `json:"zkVerifyPort"`
 }
 
 // Name returns the name of the App
@@ -1082,6 +1089,7 @@ func (app *GaiaApp) initController(ctx sdk.Context, bootstrap bool) {
 		VibcPort:        app.vibcPort,
 		VlocalchainPort: app.vlocalchainPort,
 		VtransferPort:   app.vtransferPort,
+		ZkVerifyPort:    app.zkVerifyPort,
 	}
 	// This uses `BlockingSend` as a friendly wrapper for `sendToController`
 	//

@@ -50,6 +50,7 @@ export const BridgeId = /** @type {const} */ ({
   VLOCALCHAIN: 'vlocalchain',
   VTRANSFER: 'vtransfer',
   WALLET: 'wallet',
+  ZK_VERIFY: 'zkVerify',
 });
 harden(BridgeId);
 
