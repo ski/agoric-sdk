@@ -49,7 +49,7 @@ func main() {
 	fmt.Printf("VERIFY:   %s/verify (avg of %d)\n", (time.Since(t0) / N).Round(time.Microsecond), N)
 
 	// soundness: forged nullifier + forged root must FAIL
-	bad := &pool.Transfer{Root: w.Root, Nullifier: pool.HashFr(pool.FeU64(999), pool.FeU64(pool.NullifierTag)), CmOut0: w.CmOut0, CmOut1: w.CmOut1, Fee: 3}
+	bad := &pool.Transfer{Root: w.Root, Nullifier: pool.HashFr(pool.FeU64(999), pool.FeU64(424242)), CmOut0: w.CmOut0, CmOut1: w.CmOut1, Fee: 3}
 	badW, _ := frontend.NewWitness(bad, ecc.BN254.ScalarField(), frontend.PublicOnly())
 	if groth16.Verify(proof, vk, badW) == nil {
 		panic("SOUNDNESS BUG: forged nullifier verified")
@@ -60,6 +60,16 @@ func main() {
 		panic("SOUNDNESS BUG: forged root verified")
 	}
 	fmt.Println("soundness: forged nullifier + forged root correctly REJECTED")
+
+	// spend authority (M6a): an attacker with the WRONG sk cannot spend the note — their nk differs, so cmIn
+	// is not in the tree, and proving fails (unsatisfiable constraints).
+	wrong := pool.SampleWitness()
+	wrong.Sk = 12345 // not the owner's key
+	wrongW, _ := frontend.NewWitness(wrong, ecc.BN254.ScalarField())
+	if _, perr := groth16.Prove(ccs, pk, wrongW); perr == nil {
+		panic("SOUNDNESS BUG: spent a note without its spend key")
+	}
+	fmt.Println("spend authority: wrong sk cannot spend the note (proving fails) — owner-bound")
 
 	writeArtifact("vk.bin", vk)
 	writeArtifact("proof.bin", proof)

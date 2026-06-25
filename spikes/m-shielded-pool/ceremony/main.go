@@ -92,7 +92,7 @@ func main() {
 	fmt.Println("VERIFY: a proof under the CEREMONY vk verifies — single-party trusted setup eliminated")
 
 	// soundness still holds under ceremony keys
-	bad := &pool.Transfer{Root: w.Root, Nullifier: pool.HashFr(pool.FeU64(999), pool.FeU64(pool.NullifierTag)), CmOut0: w.CmOut0, CmOut1: w.CmOut1, Fee: 3}
+	bad := &pool.Transfer{Root: w.Root, Nullifier: pool.HashFr(pool.FeU64(999), pool.FeU64(424242)), CmOut0: w.CmOut0, CmOut1: w.CmOut1, Fee: 3}
 	badW, _ := frontend.NewWitness(bad, ecc.BN254.ScalarField(), frontend.PublicOnly())
 	if groth16.Verify(proof, vk, badW) == nil {
 		panic("SOUNDNESS BUG: forged public input verified under ceremony vk")
