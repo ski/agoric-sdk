@@ -5,20 +5,21 @@
 //   - transfer: confidential 1-in/2-out (M6a/M6b) -> no value moves, only the commitment set changes.
 //   - withdraw: a withdraw proof for a revealed amount + want {Asset: N} -> pay N from the pool, burn (nf).
 //
-// M7c — DURABLE + UPGRADABLE. The 3rd `baggage` arg makes Zoe treat this as an upgradable contract; ALL state
-//   (tree, roots, nullifiers, note ciphertexts, counters, the escrow + reserve seats) lives in baggage-backed
-//   durable stores, so a chain upgrade / restart preserves the pool instead of wiping `let root` / `new Set()`.
-// M7e — the verifying keys are DURABLE, GOVERNANCE-ROTATABLE params (not deploy-baked privateArgs): held in a
-//   durable `params` store, initialized once from privateArgs, rotated via the creatorFacet (the governance-held
-//   facet) and the new vk-hash published to vstorage for audit — so a circuit can be rotated WITHOUT a redeploy.
+// M7c — DURABLE + UPGRADABLE. The 3rd `baggage` arg makes Zoe treat this as upgradable; ALL state (tree, roots,
+//   nullifiers, note ciphertexts, counters, the escrow + reserve seats) lives in baggage-backed durable stores,
+//   AND the public/creator facets are durable EXOS (zone.exoClassKit) so the vat actually revives across an
+//   upgrade (plain Far facets fail startVat on the next incarnation). State + identity both survive.
+// M7e — verifying keys are DURABLE, GOVERNANCE-ROTATABLE params (not deploy-baked): a durable `params` store,
+//   init once from privateArgs, rotated via the creatorFacet (the gov-held facet) — no redeploy — with a
+//   content fingerprint published for audit.
 //
-// Value-layer is asset-agnostic: escrow is zcf.atomicRearrange over a Brand. PRODUCTION starts with
-// issuerKeywordRecord { Asset: IST }; the self-minted "Shield" demo asset is the fallback. Root on-chain (M6b);
-// nullifiers prevent double-spend (M4); owner-bound notes (M6a); production depth 32 (M7b).
+// Value-layer is asset-agnostic. PRODUCTION starts with issuerKeywordRecord { Asset: IST }; self-minted "Shield"
+// is the demo fallback. Root on-chain (M6b); nullifiers prevent double-spend (M4); owner-bound notes (M6a); depth 32 (M7b).
 //
 // privateArgs: { zkVerify, mimcHash, transferVk, depositVk, withdrawVk, storageNode? }
-import { E, Far } from '@endo/far';
+import { E } from '@endo/far';
 import { AmountMath } from '@agoric/ertp';
+import { M, provide } from '@agoric/vat-data';
 import { makeDurableZone } from '@agoric/zone/durable.js';
 import { provideEmptySeat } from '@agoric/zoe/src/contractSupport/durability.js';
 
@@ -26,33 +27,27 @@ const VERIFY = 'VERIFY_GROTH16_BN254';
 const MIMC = 'MIMC_BN254';
 const DEPTH = 32; // M7b production depth — MUST match the circuit (pool.TreeDepth) or proof roots never line up
 
-// Upgradable contract: the 3rd `baggage` arg is what makes Zoe keep this instance across upgrades.
 export const start = async (zcf, privateArgs, baggage) => {
   const { zkVerify, mimcHash, transferVk, depositVk, withdrawVk, storageNode } = privateArgs;
   assert(zkVerify && mimcHash, 'zkVerify + mimcHash required');
   const zone = makeDurableZone(baggage);
 
-  // ── asset: IST in production (terms.Asset), self-minted Shield in the demo (durable across upgrade) ──
+  // ── asset: IST in production (terms.Asset), self-minted Shield in the demo (durable mint, reused on upgrade) ──
   const terms = zcf.getTerms();
   let assetBrand;
   let assetIssuer;
-  let faucet; // demo mode only
+  let mintFaucet; // demo only — returns a Shield payment; undefined in IST mode
   if (terms.brands && terms.brands.Asset) {
     assetBrand = terms.brands.Asset;
     assetIssuer = terms.issuers.Asset;
   } else {
-    // makeZCFMint returns a durable mint in an upgradable contract — create once, reuse from baggage on upgrade.
     let shieldMint;
-    if (baggage.has('shieldMint')) {
-      shieldMint = baggage.get('shieldMint');
-    } else {
-      shieldMint = await zcf.makeZCFMint('Shield');
-      baggage.init('shieldMint', shieldMint);
-    }
+    if (baggage.has('shieldMint')) shieldMint = baggage.get('shieldMint');
+    else { shieldMint = await zcf.makeZCFMint('Shield'); baggage.init('shieldMint', shieldMint); }
     const rec = shieldMint.getIssuerRecord();
     assetBrand = rec.brand;
     assetIssuer = rec.issuer;
-    faucet = async value => {
+    mintFaucet = async value => {
       const { zcfSeat, userSeat } = zcf.makeEmptySeatKit();
       shieldMint.mintGains(harden({ Asset: AmountMath.make(assetBrand, BigInt(value)) }), zcfSeat);
       zcfSeat.exit();
@@ -78,12 +73,23 @@ export const start = async (zcf, privateArgs, baggage) => {
   const hash2 = async (a, b) => (await E(mimcHash).toBridge({ type: MIMC, inputs: [String(a), String(b)] })).hash;
   const verify = (vk, proof, pub) => E(zkVerify).toBridge({ type: VERIFY, vk, proof, pub });
 
-  // zeros (empty-subtree hashes) are deterministic — recomputed in-memory each incarnation, never stored.
-  const zeros = ['0'];
-  for (let i = 1; i <= DEPTH; i += 1) zeros.push(await hash2(zeros[i - 1], zeros[i - 1]));
+  const firstIncarnation = !scalars.has('root'); // true only on initial deploy; false on every upgrade
 
-  // one-time init (first incarnation only); on upgrade the durable stores already hold live state.
-  if (!scalars.has('root')) {
+  // zeros (empty-subtree hashes) are deterministic. CRITICAL for upgrade: compute them via the mimcHash BRIDGE
+  // only on the FIRST incarnation (cross-vat calls are allowed then) and persist them; an UPGRADE incarnation must
+  // finish buildRootObject WITHOUT contacting other vats, so it just reads them back from the durable store.
+  const zerosStore = zone.mapStore('zeros');
+  if (!zerosStore.has(0)) {
+    let z = '0';
+    zerosStore.init(0, z);
+    for (let i = 1; i <= DEPTH; i += 1) { z = await hash2(z, z); zerosStore.init(i, z); }
+  }
+  const zeros = [];
+  for (let i = 0; i <= DEPTH; i += 1) zeros.push(zerosStore.get(i)); // in-memory mirror (sync read; no bridge on upgrade)
+
+  // one-time init + initial publish (first incarnation only); on upgrade the durable stores already hold live state
+  // and we must NOT call the bridge/vstorage here (buildRootObject would never resolve).
+  if (firstIncarnation) {
     for (let level = 0; level < DEPTH; level += 1) filledSubtrees.init(level, zeros[level]);
     scalars.init('nextIndex', 0);
     scalars.init('root', zeros[DEPTH]);
@@ -112,7 +118,6 @@ export const start = async (zcf, privateArgs, baggage) => {
   const escrowed = () => pool.getAmountAllocated('Asset', assetBrand).value;
   const reserved = () => reserve.getAmountAllocated('Asset', assetBrand).value;
 
-  // M6d: encrypted note ciphertexts (opening sealed to the recipient), published so recipients trial-decrypt theirs.
   const notesNode = storageNode ? E(storageNode).makeChildNode('notes') : undefined;
   const publishNotes = async cts => {
     if (!cts || !cts.length) return;
@@ -122,19 +127,17 @@ export const start = async (zcf, privateArgs, baggage) => {
     if (notesNode) await E(notesNode).setValue(JSON.stringify([...notesStore.values()]));
   };
 
+  const stateView = () => harden({
+    root: scalars.get('root'),
+    leaves: scalars.get('nextIndex'),
+    roots: rootHistory.getSize(),
+    nullifiers: [...nullifiers.keys()],
+    escrowed: String(escrowed()),
+    reserve: String(reserved()),
+  });
   const publish = async () => {
     if (!storageNode) return;
-    await E(storageNode).setValue(
-      JSON.stringify({
-        root: scalars.get('root'),
-        leaves: scalars.get('nextIndex'),
-        roots: rootHistory.getSize(),
-        nullifiers: [...nullifiers.keys()],
-        escrowed: String(escrowed()),
-        reserve: String(reserved()),
-        notes: scalars.get('noteCount'),
-      }),
-    );
+    await E(storageNode).setValue(JSON.stringify({ ...stateView(), notes: scalars.get('noteCount') }));
   };
 
   const depositHandler = async (seat, offerArgs) => {
@@ -142,7 +145,7 @@ export const start = async (zcf, privateArgs, baggage) => {
       const { proof, pub } = offerArgs || {};
       const res = await verify(params.get('depositVk'), proof, pub);
       assert(res && res.ok, 'deposit: proof rejected');
-      const [cm, amount] = res.public; // authenticated [Cm, Amount]
+      const [cm, amount] = res.public;
       const given = seat.getAmountAllocated('Asset', assetBrand);
       assert(given.value === BigInt(amount), `deposit: gave ${given.value}, proof commits ${amount}`);
       zcf.atomicRearrange(harden([[seat, pool, { Asset: given }]]));
@@ -159,7 +162,7 @@ export const start = async (zcf, privateArgs, baggage) => {
       const { proof, pub } = offerArgs || {};
       const res = await verify(params.get('withdrawVk'), proof, pub);
       assert(res && res.ok, 'withdraw: proof rejected');
-      const [pRoot, nf, amount] = res.public; // authenticated [Root, Nullifier, Amount]
+      const [pRoot, nf, amount] = res.public;
       assert(rootHistory.has(pRoot), 'withdraw: unknown merkle root');
       assert(!nullifiers.has(nf), 'withdraw: nullifier already used');
       const want = AmountMath.make(assetBrand, BigInt(amount));
@@ -182,12 +185,8 @@ export const start = async (zcf, privateArgs, baggage) => {
       nullifiers.add(nf);
       await insert(cmOut0);
       await insert(cmOut1);
-      // M7a: the fee leaves the shielded set (outputs sum to amtIn - fee), so route it pool -> reserve, keeping
-      // the pool exactly note-backed.
       const feeV = BigInt(fee);
-      if (feeV > 0n) {
-        zcf.atomicRearrange(harden([[pool, reserve, { Asset: AmountMath.make(assetBrand, feeV) }]]));
-      }
+      if (feeV > 0n) zcf.atomicRearrange(harden([[pool, reserve, { Asset: AmountMath.make(assetBrand, feeV) }]]));
       await publishNotes((offerArgs || {}).noteCiphertexts);
       seat.exit();
       await publish();
@@ -195,41 +194,40 @@ export const start = async (zcf, privateArgs, baggage) => {
     } catch (err) { seat.exit(err); throw err; }
   };
 
-  const publicFacet = Far('ShieldedPool public', {
-    getAssetIssuer: () => assetIssuer,
-    getAssetBrand: () => assetBrand,
-    makeDepositInvitation: () => zcf.makeInvitation(depositHandler, 'shield-deposit'),
-    makeTransferInvitation: () => zcf.makeInvitation(transferHandler, 'shield-transfer'),
-    makeWithdrawInvitation: () => zcf.makeInvitation(withdrawHandler, 'shield-withdraw'),
-    getVerifyingKeyFingerprints: () => {
-      // audit surface: a content-sensitive fingerprint of each governance-managed VK (len + head + tail, not the
-      // full bytes), so anyone can confirm WHICH circuit the live pool verifies against + detect a rotation.
-      const fp = k => { const v = params.get(k); return harden({ len: v.length, head: v.slice(0, 12), tail: v.slice(-12) }); };
-      return harden({ transfer: fp('transferVk'), deposit: fp('depositVk'), withdraw: fp('withdrawVk') });
+  const fingerprint = k => { const v = params.get(k); return harden({ len: v.length, head: v.slice(0, 12), tail: v.slice(-12) }); };
+
+  // ── durable EXO facets (M7c): identity persists across upgrade; behavior is re-bound to this incarnation's
+  // closures (durable stores + re-supplied bridge presences) each time start() runs. loose guards (passable). ──
+  const anyGuard = M.interface('ShieldedPool', {}, { defaultGuards: 'passable' });
+  const makeKit = zone.exoClassKit('ShieldedPool', { publicFacet: anyGuard, creatorFacet: anyGuard }, () => ({}), {
+    publicFacet: {
+      getAssetIssuer() { return assetIssuer; },
+      getAssetBrand() { return assetBrand; },
+      makeDepositInvitation() { return zcf.makeInvitation(depositHandler, 'shield-deposit'); },
+      makeTransferInvitation() { return zcf.makeInvitation(transferHandler, 'shield-transfer'); },
+      makeWithdrawInvitation() { return zcf.makeInvitation(withdrawHandler, 'shield-withdraw'); },
+      // audit surface: content fingerprint of each governance-managed VK (len + head + tail), not the bytes.
+      getVerifyingKeyFingerprints() { return harden({ transfer: fingerprint('transferVk'), deposit: fingerprint('depositVk'), withdraw: fingerprint('withdrawVk') }); },
+      getState() { return stateView(); },
     },
-    getState: () => harden({
-      root: scalars.get('root'),
-      leaves: scalars.get('nextIndex'),
-      roots: rootHistory.getSize(),
-      nullifiers: [...nullifiers.keys()],
-      escrowed: String(escrowed()),
-      reserve: String(reserved()),
-    }),
+    creatorFacet: {
+      // demo only — throws in IST mode (nothing to mint).
+      async faucet(value) { assert(mintFaucet, 'no faucet: IST-escrow mode'); return mintFaucet(value); },
+      // M7e: rotate a verifying key (circuit upgrade) WITHOUT a redeploy. In production this facet is held by the
+      // governance charter, so a rotation is a governance action; the new fingerprint is republished for audit.
+      async rotateVerifyingKey(which, vk) {
+        assert(['transferVk', 'depositVk', 'withdrawVk'].includes(which), `unknown vk param: ${which}`);
+        assert(typeof vk === 'string' && vk.length > 0, 'vk must be a non-empty base64 string');
+        params.set(which, vk);
+        await publish();
+        return harden({ ok: true, rotated: which });
+      },
+    },
   });
 
-  // M7e: the creatorFacet is the GOVERNANCE-HELD surface — in production the deploy hands it to the gov charter,
-  // so rotating a verifying key (circuit upgrade) is a governance action, not a contract redeploy. Each rotation
-  // republishes state (incl. the vk-hash via getVerifyingKeyHashes) for audit. The demo `faucet` is creator-only.
-  const rotateVerifyingKey = async (which, vk) => {
-    assert(['transferVk', 'depositVk', 'withdrawVk'].includes(which), `unknown vk param: ${which}`);
-    assert(typeof vk === 'string' && vk.length > 0, 'vk must be a non-empty base64 string');
-    params.set(which, vk);
-    await publish();
-    return harden({ ok: true, rotated: which });
-  };
-  const creatorFacet = Far('ShieldedPool creator', faucet ? { faucet, rotateVerifyingKey } : { rotateVerifyingKey });
-
-  await publish();
+  // create once, durably; on upgrade `provide` returns the same exo (re-bound to the new behavior above).
+  const { publicFacet, creatorFacet } = provide(baggage, 'thePool', () => makeKit());
+  if (firstIncarnation) await publish(); // bridge/vstorage call is allowed only on the first incarnation
   return harden({ publicFacet, creatorFacet });
 };
 harden(start);

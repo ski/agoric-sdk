@@ -3,3 +3,5 @@
 *.b64
 wire-shielded-coreeval.js
 setup-assets/setup-assets
+upgrade-coreeval.js
+dep-proof.json

@@ -7,6 +7,7 @@
     "@endo/far": "*",
     "@agoric/ertp": "*",
     "@agoric/zone": "*",
-    "@agoric/zoe": "*"
+    "@agoric/zoe": "*",
+    "@agoric/vat-data": "*"
   }
 }
