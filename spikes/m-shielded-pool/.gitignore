@@ -5,3 +5,6 @@ wire-shielded-coreeval.js
 setup-assets/setup-assets
 upgrade-coreeval.js
 dep-proof.json
+payout-coreeval.js
+payout-deposit.json
+payout-withdraw.json
