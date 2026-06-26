@@ -201,11 +201,11 @@ export const start = async (zcf, privateArgs, baggage) => {
     makeDepositInvitation: () => zcf.makeInvitation(depositHandler, 'shield-deposit'),
     makeTransferInvitation: () => zcf.makeInvitation(transferHandler, 'shield-transfer'),
     makeWithdrawInvitation: () => zcf.makeInvitation(withdrawHandler, 'shield-withdraw'),
-    getVerifyingKeyHashes: async () => {
-      // audit surface: the hash of each governance-managed VK (not the key bytes), so anyone can confirm
-      // which circuit the live pool is verifying against.
-      const h = async k => (await E(mimcHash).toBridge({ type: MIMC, inputs: [String(params.get(k).length), k] })).hash;
-      return harden({ transfer: await h('transferVk'), deposit: await h('depositVk'), withdraw: await h('withdrawVk') });
+    getVerifyingKeyFingerprints: () => {
+      // audit surface: a content-sensitive fingerprint of each governance-managed VK (len + head + tail, not the
+      // full bytes), so anyone can confirm WHICH circuit the live pool verifies against + detect a rotation.
+      const fp = k => { const v = params.get(k); return harden({ len: v.length, head: v.slice(0, 12), tail: v.slice(-12) }); };
+      return harden({ transfer: fp('transferVk'), deposit: fp('depositVk'), withdraw: fp('withdrawVk') });
     },
     getState: () => harden({
       root: scalars.get('root'),
