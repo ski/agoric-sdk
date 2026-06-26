@@ -5,6 +5,8 @@
   "type": "module",
   "dependencies": {
     "@endo/far": "*",
-    "@agoric/ertp": "*"
+    "@agoric/ertp": "*",
+    "@agoric/zone": "*",
+    "@agoric/zoe": "*"
   }
 }
