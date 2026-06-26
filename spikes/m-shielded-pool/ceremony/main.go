@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
+	"runtime/debug"
 	"slices"
 
 	"github.com/consensys/gnark-crypto/ecc"
@@ -61,6 +63,11 @@ func main() {
 	srs, err := mpcsetup.VerifyPhase1(domainSize, []byte("moimoi phase1 beacon"), phase1...)
 	must(err)
 	fmt.Println("phase1 verified — contribution chain valid")
+	// free Phase-1 working set before the heavier Phase-2 allocates (depth-32 memory headroom: was OOMing).
+	s1 = nil
+	phase1 = nil
+	runtime.GC()
+	debug.FreeOSMemory()
 
 	// ---- Phase 2: circuit-specific ----
 	var p2 mpcsetup.Phase2
@@ -76,6 +83,8 @@ func main() {
 		phase2[i] = new(mpcsetup.Phase2)
 		deser(phase2[i], s2[i])
 	}
+	s2 = nil
+	runtime.GC()
 	pk, vk, err := mpcsetup.VerifyPhase2(ccs, &srs, []byte("moimoi phase2 beacon"), phase2...)
 	must(err)
 	fmt.Println("phase2 verified — ceremony pk/vk extracted (toxic waste unrecoverable unless ALL colluded)")
