@@ -37,6 +37,11 @@ type inputs struct {
 	Amt1      uint64 `json:"amt1"`
 	Nk1       string `json:"nk1"`
 	Rho1      string `json:"rho1"`
+	// M7-finalize: REAL Merkle path from the live tree (siblings + left/right bits, root-to-... per level). When
+	// present (len == TreeDepth) the prover proves membership against the live multi-note tree; absent, it falls
+	// back to the empty-tree single-note path (BuildTreePath) for the legacy/demo case.
+	PathElements []string `json:"pathElements"`
+	PathIndices  []int    `json:"pathIndices"`
 }
 
 func feDec(s string) fr.Element {
@@ -51,6 +56,30 @@ func feDec(s string) fr.Element {
 func b64(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
 
 func errObj(msg string) any { return map[string]any{"error": msg} }
+
+// resolvePath builds the (root, pathElements, pathIndices) for a note's commitment. If a real Merkle path is
+// supplied (elsB/idx of length TreeDepth), it computes the root by walking up from the leaf — matching the
+// in-circuit Select(left,right) per the index bit — so proofs verify against the live multi-note tree root.
+// Otherwise it falls back to the empty-tree single-note path (BuildTreePath), the legacy/demo case (leaf 0).
+func resolvePath(leaf fr.Element, leafIndex int, elsB []string, idx []int) (fr.Element, [pool.TreeDepth]fr.Element, [pool.TreeDepth]int) {
+	if len(elsB) == pool.TreeDepth && len(idx) == pool.TreeDepth {
+		var pathEls [pool.TreeDepth]fr.Element
+		var pathIdx [pool.TreeDepth]int
+		cur := leaf
+		for d := 0; d < pool.TreeDepth; d++ {
+			el := feDec(elsB[d])
+			pathEls[d] = el
+			pathIdx[d] = idx[d]
+			if idx[d] == 1 {
+				cur = pool.HashFr(el, cur) // leaf is the RIGHT child; sibling on the left
+			} else {
+				cur = pool.HashFr(cur, el) // leaf is the LEFT child; sibling on the right
+			}
+		}
+		return cur, pathEls, pathIdx
+	}
+	return pool.BuildTreePath(leaf, leafIndex)
+}
 
 // proveShielded(pkB64, ccsB64, inputsJson) -> { proof, pub } (base64) or { error }
 func proveShielded(_ js.Value, args []js.Value) any {
@@ -88,7 +117,7 @@ func proveShielded(_ js.Value, args []js.Value) any {
 	nf := pool.HashFr(nk, rhoIn)
 	cmOut0 := pool.HashFr3(pool.FeU64(in.Amt0), feDec(in.Nk0), feDec(in.Rho0))
 	cmOut1 := pool.HashFr3(pool.FeU64(in.Amt1), feDec(in.Nk1), feDec(in.Rho1))
-	root, pathEls, pathIdx := pool.BuildTreePath(cmIn, in.LeafIndex)
+	root, pathEls, pathIdx := resolvePath(cmIn, in.LeafIndex, in.PathElements, in.PathIndices)
 
 	w := &pool.Transfer{
 		Root: root, Nullifier: nf, CmOut0: cmOut0, CmOut1: cmOut1, Fee: in.AmtIn - in.Amt0 - in.Amt1,
@@ -151,10 +180,12 @@ func proveShieldedDeposit(_ js.Value, args []js.Value) any {
 }
 
 type withdrawInputs struct {
-	Sk        string `json:"sk"`
-	Amount    uint64 `json:"amount"`
-	Rho       string `json:"rho"`
-	LeafIndex int    `json:"leafIndex"`
+	Sk           string   `json:"sk"`
+	Amount       uint64   `json:"amount"`
+	Rho          string   `json:"rho"`
+	LeafIndex    int      `json:"leafIndex"`
+	PathElements []string `json:"pathElements"` // M7-finalize: real path (see inputs.PathElements)
+	PathIndices  []int    `json:"pathIndices"`
 }
 
 // proveShieldedWithdraw(pkB64, ccsB64, inputsJson) -> {proof, pub} — proves ownership of a note for a revealed amount.
@@ -176,7 +207,7 @@ func proveShieldedWithdraw(_ js.Value, args []js.Value) any {
 	nk := pool.HashFr(sk, pool.FeU64(pool.NkTag))
 	cm := pool.HashFr3(pool.FeU64(in.Amount), nk, rho)
 	nf := pool.HashFr(nk, rho)
-	root, pathEls, pathIdx := pool.BuildTreePath(cm, in.LeafIndex)
+	root, pathEls, pathIdx := resolvePath(cm, in.LeafIndex, in.PathElements, in.PathIndices)
 	w := &pool.Withdraw{Root: root, Nullifier: nf, Amount: in.Amount, Sk: sk, Rho: rho}
 	for i := 0; i < pool.TreeDepth; i++ {
 		w.PathElements[i] = pathEls[i]

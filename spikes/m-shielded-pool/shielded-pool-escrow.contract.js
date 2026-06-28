@@ -67,6 +67,9 @@ export const start = async (zcf, privateArgs, baggage) => {
   const nullifiers = zone.setStore('nullifiers');
   const filledSubtrees = zone.mapStore('filledSubtrees'); // level -> hash
   const notesStore = zone.mapStore('notes'); // index -> ciphertext (passable)
+  const leavesStore = zone.mapStore('leaves'); // M7-finalize: tree index -> leaf commitment (decimal string), so
+  // a client can rebuild the REAL Merkle authentication path for ANY note (not just the empty-tree leaf-0 case).
+  // Commitments are hiding — publishing them leaks nothing about amounts/owners.
   const pool = provideEmptySeat(zcf, baggage, 'pool'); // durable escrow seat (survives upgrade)
   const reserve = provideEmptySeat(zcf, baggage, 'reserve'); // M7a protocol-fee accrual
 
@@ -100,6 +103,7 @@ export const start = async (zcf, privateArgs, baggage) => {
   const insert = async leaf => {
     let idx = scalars.get('nextIndex');
     assert(idx < 2 ** DEPTH, 'tree full'); // 1<<32 overflows to 1 in JS — use 2**DEPTH
+    leavesStore.init(idx, String(leaf)); // record the leaf at its tree position (idx is mutated below)
     let cur = String(leaf);
     for (let level = 0; level < DEPTH; level += 1) {
       let left;
@@ -119,6 +123,10 @@ export const start = async (zcf, privateArgs, baggage) => {
   const reserved = () => reserve.getAmountAllocated('Asset', assetBrand).value;
 
   const notesNode = storageNode ? E(storageNode).makeChildNode('notes') : undefined;
+  const leavesNode = storageNode ? E(storageNode).makeChildNode('leaves') : undefined; // M7-finalize: published tree leaves
+  const publishLeaves = async () => {
+    if (leavesNode) await E(leavesNode).setValue(JSON.stringify([...leavesStore.values()]));
+  };
   const publishNotes = async cts => {
     if (!cts || !cts.length) return;
     let n = scalars.get('noteCount');
@@ -138,6 +146,7 @@ export const start = async (zcf, privateArgs, baggage) => {
   const publish = async () => {
     if (!storageNode) return;
     await E(storageNode).setValue(JSON.stringify({ ...stateView(), notes: scalars.get('noteCount') }));
+    await publishLeaves();
   };
 
   const depositHandler = async (seat, offerArgs) => {
